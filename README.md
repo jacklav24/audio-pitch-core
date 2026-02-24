@@ -493,3 +493,182 @@ They are designed to surface:
 This layer exists to make estimator behavior **inspectable**, not to make it look better.
 
 
+# Spectrogram (`Spectrogram`)
+
+A `Spectrogram` is a deterministic, STFT-based time–frequency representation of an `AudioBuffer`, built strictly on top of the existing frame lattice and designed as a reversible analytical substrate.
+
+#### Purpose
+
+Framing gives us time-local slices.
+
+The spectrogram gives us **frequency-domain structure** within those slices.
+
+This layer exists to:
+
+-   Introduce a deterministic time–frequency representation
+    
+-   Remain fully invertible (within defined coverage)
+    
+-   Preserve the no-padding policy
+    
+-   Serve as infrastructure for future frequency-domain analysis
+    
+
+It is not an interpretation layer.
+
+----------
+
+### Input
+
+-   A valid `AudioBuffer`
+    
+-   A fixed `window_size`
+    
+-   A fixed `hop_size`
+    
+-   Optional `fft_size` (must satisfy `fft_size ≥ window_size`)
+    
+-   A specified window type (`"hann"` or `"rectangular"`)
+    
+
+We reuse `build_frames(...)`.
+
+No alternate framing logic is introduced.
+
+----------
+
+### Boundary Policy
+
+The spectrogram inherits the framing contract:
+
+Only **fully contained frames** are transformed.
+
+No padding, centering, or signal extension is performed.
+
+If the signal length does not allow a full final frame, the tail is excluded.
+
+The spectrogram spans:
+
+covered_length =  
+ hop_size * (n_frames - 1) + window_size
+
+This may be less than the original signal length.
+
+This is intentional.
+
+----------
+
+### Representation
+
+Shape convention:
+
+complex_spectrum.shape = (n_frames, n_bins)  
+n_bins = fft_size // 2 + 1   (rFFT convention)
+
+The object exposes:
+
+-   `complex_spectrum`
+    
+-   `magnitude`
+    
+-   `phase`
+    
+-   `time_axis`
+    
+-   `frequency_axis`
+    
+-   `covered_length`
+    
+-   `original_length`
+    
+
+All stored arrays are immutable.
+
+No scaling beyond NumPy FFT conventions is applied.
+
+No log compression.
+
+No perceptual warping.
+
+No normalization beyond overlap-add compensation in the inverse.
+
+----------
+
+### Inverse (Overlap-Add Reconstruction)
+
+The inverse transform:
+
+-   Uses `irfft`
+    
+-   Reapplies the analysis window
+    
+-   Performs overlap-add
+    
+-   Normalizes by accumulated window energy
+    
+-   Returns a new `AudioBuffer`
+    
+-   Reconstructs exactly the covered region
+    
+
+Reconstruction error is on the order of floating-point precision (~1e-7 for float32 input).
+
+The transform is therefore:
+
+AudioBuffer  
+ ↓  
+Spectrogram  
+ ↓  
+AudioBuffer (covered region only)
+
+Invertible over its defined domain.
+
+----------
+
+### Window Behavior
+
+For a Hann window with 50% overlap:
+
+-   Interior samples satisfy constant overlap-add behavior.
+    
+-   Window energy is constant across the interior.
+    
+-   Boundary samples taper to zero (no padding policy).
+    
+
+Window normalization is computed explicitly as:
+
+output /= sum(window^2 overlaps)
+
+No hidden normalization is applied.
+
+----------
+
+### Non-Responsibilities
+
+The spectrogram layer does **not**:
+
+-   Estimate pitch
+    
+-   Perform masking
+    
+-   Compute chroma
+    
+-   Compute MFCC
+    
+-   Apply mel scaling
+    
+-   Perform source separation
+    
+-   Smooth
+    
+-   Threshold
+    
+-   Interpret musical structure
+    
+-   Use machine learning
+    
+
+It is infrastructure only.
+
+Future frequency-domain layers will build on top of this abstraction.

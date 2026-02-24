@@ -22,7 +22,9 @@ import core.audio_buffer as ab
 import core.framing as fr
 import analysis.pitch_frame as pf
 import analysis.smoothing as sm
-
+import core.spectrogram as sp
+import matplotlib.pyplot as plt
+import numpy as np
 from analysis.diagnostics import summarize_pitch_track
 
 def inspect_frames_around_time(frames, pitch_frames, target_time, window=0.25):
@@ -275,6 +277,135 @@ def run_diagnostics(pitch_frames: list[pf.PitchFrame]):
     print(f"  High-conf median |Δf0| Hz : {diagnostics.confidence.high_conf_median_abs_delta_hz:.3f}")
     print(f"  Conf–Δf0 monotonicity     : {diagnostics.confidence.conf_delta_monotonicity:.3f}")
     
+def plot_spectrogram(spec: sp.Spectrogram, db: bool = False):
+    """
+    Visualize magnitude spectrogram.
+    """
+    magnitude = spec.magnitude
+
+    if db:
+        magnitude = 20 * np.log10(np.maximum(magnitude, 1e-10))
+
+    plt.figure(figsize=(10, 4))
+    plt.imshow(
+        magnitude.T,
+        aspect="auto",
+        origin="lower",
+        extent=[
+            spec.time_axis[0],
+            spec.time_axis[-1],
+            spec.frequency_axis[0],
+            spec.frequency_axis[-1],
+        ],
+    )
+    plt.colorbar(label="Magnitude (dB)" if db else "Magnitude")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Frequency (Hz)")
+    plt.title("Spectrogram")
+    plt.tight_layout()
+    plt.show()
+
+def inspect_spectrum_frame(spec: sp.Spectrogram, frame_index: int):
+    """
+    Plot magnitude and phase of a single STFT frame.
+    """
+    if frame_index < 0 or frame_index >= spec.complex_spectrum.shape[0]:
+        raise ValueError("Invalid frame index.")
+
+    freqs = spec.frequency_axis
+    magnitude = spec.magnitude[frame_index]
+    phase = spec.phase[frame_index]
+
+    plt.figure(figsize=(10, 5))
+
+    plt.subplot(2, 1, 1)
+    plt.plot(freqs, magnitude)
+    plt.ylabel("Magnitude")
+    plt.title(f"Frame {frame_index} Spectrum")
+
+    plt.subplot(2, 1, 2)
+    plt.plot(freqs, phase)
+    plt.ylabel("Phase (radians)")
+    plt.xlabel("Frequency (Hz)")
+
+    plt.tight_layout()
+    plt.show()
+    
+def validate_stft_roundtrip(audio: ab.AudioBuffer, spec: sp.Spectrogram):
+    """
+    Validate forward → inverse reconstruction error over the covered region.
+
+    The Spectrogram operates only on fully-contained frames and therefore
+    represents only the interval [0, covered_length). Samples beyond this
+    region are intentionally excluded (no padding policy).
+    """
+
+    reconstructed = spec.inverse()
+
+    original = audio.data
+    covered_length = spec.covered_length
+
+    if len(reconstructed.data) != covered_length:
+        raise ValueError(
+            "Reconstructed signal length does not match spectrogram covered length."
+        )
+
+    if covered_length > len(original):
+        raise ValueError(
+            "Covered length exceeds original signal length."
+        )
+
+    # Compare only covered region
+    error = original[:covered_length] - reconstructed.data
+
+    max_error = np.max(np.abs(error))
+    mean_error = np.mean(np.abs(error))
+
+    print("\nSTFT Roundtrip Validation")
+    print(f"  Original length      : {len(original)}")
+    print(f"  Covered length       : {covered_length}")
+    print(f"  Max abs error        : {max_error:.8e}")
+    print(f"  Mean abs error       : {mean_error:.8e}")
+
+    # Optional: RMS error
+    rms_error = np.sqrt(np.mean(error ** 2))
+    print(f"  RMS error            : {rms_error:.8e}")
+
+    # Plot reconstruction error
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(10, 3))
+    plt.plot(error, linewidth=0.5)
+    plt.title("Reconstruction Error (Covered Region Only)")
+    plt.xlabel("Sample Index")
+    plt.ylabel("Error")
+    plt.tight_layout()
+    plt.show()
+    
+def visualize_window_overlap(spec: sp.Spectrogram):
+    """
+    Visualize accumulated window overlap energy profile.
+    """
+    n_frames = spec.complex_spectrum.shape[0]
+    hop = spec._hop_size
+    window = spec._window_vector
+    window_size = spec._window_size
+
+    total_length = hop * (n_frames - 1) + window_size
+    energy = np.zeros(total_length)
+
+    for k in range(n_frames):
+        start = k * hop
+        end = start + window_size
+        energy[start:end] += window ** 2
+
+    plt.figure(figsize=(10, 3))
+    plt.plot(energy)
+    plt.title("Window Overlap Energy Profile")
+    plt.tight_layout()
+    plt.show()
+    
+            
 def main():
     # Example audio inputs used for local diagnostics
     FILE_PATHS = ["bass1.wav", "something.wav"]
@@ -309,18 +440,38 @@ def main():
     smoothed_pitch_frames = sm.smooth_pitch_frames(pitch_frames, confidence_min=confidence_min, window_size=window_size)
     print(f"Built {len(smoothed_pitch_frames)} smoothed PitchFrames with confidence_min of {confidence_min} and window size of {window_size}")
     
-    #debug_frame_function(audio, frames, frame_size_samples, duration_seconds)
-    # debug_pitch_frame_function(pitch_frames, frames)
-    # plot_pitch_window(frames, pitch_frames, t_start=35.0, t_end=40.0)
-    # inspect_frames_around_time(frames, pitch_frames, target_time=2.5, window=0.3)
-    # assert_no_pitch_invention(pitch_frames, smoothed_pitch_frames)
-    # summarize_smoothing_adjustments(pitch_frames, smoothed_pitch_frames)
+    debug_frame_function(audio, frames, frame_size_samples, duration_seconds)
+    debug_pitch_frame_function(pitch_frames, frames)
+    plot_pitch_window(frames, pitch_frames, t_start=35.0, t_end=40.0)
+    inspect_frames_around_time(frames, pitch_frames, target_time=2.5, window=0.3)
+    assert_no_pitch_invention(pitch_frames, smoothed_pitch_frames)
+    summarize_smoothing_adjustments(pitch_frames, smoothed_pitch_frames)
     
     print("Raw (unsmoothed) diagnostics")
     run_diagnostics(pitch_frames)
 
     print("Post-refinement diagnostics")
     run_diagnostics(smoothed_pitch_frames)
+    
+    print("\n--- Building Spectrogram ---")
+
+    stft_window = frame_size_samples
+    stft_hop = hop_size_samples
+
+    spec = sp.Spectrogram.from_audio_buffer(
+        audio,
+        window_size=stft_window,
+        hop_size=stft_hop,
+        fft_size=stft_window,
+        window="hann",
+    )
+
+    print(f"Spectrogram shape: {spec.complex_spectrum.shape}")
+
+    plot_spectrogram(spec, db=True)
+    inspect_spectrum_frame(spec, frame_index=10)
+    validate_stft_roundtrip(audio, spec)
+    visualize_window_overlap(spec)
 
 
 if __name__ == "__main__":
