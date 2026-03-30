@@ -26,6 +26,8 @@ import core.spectrogram as sp
 import matplotlib.pyplot as plt
 import numpy as np
 from analysis.diagnostics import summarize_pitch_track
+import analysis.spectral_peaks as spk
+import analysis.note_projection as npj
 
 def inspect_frames_around_time(frames, pitch_frames, target_time, window=0.25):
     print(f"\nInspecting frames around {target_time:.2f}s (±{window:.2f}s):\n")
@@ -405,12 +407,66 @@ def visualize_window_overlap(spec: sp.Spectrogram):
     plt.tight_layout()
     plt.show()
     
-            
+def inspect_note_frames(note_frames, frames, target_time, window=0.05):
+    print(f"\nInspecting note hypotheses around {target_time:.2f}s (±{window:.2f}s):\n")
+
+    for f, nf in zip(frames, note_frames):
+        if abs(f.time_seconds - target_time) <= window:
+            print(f"Frame {f.frame_index:5d} | time={f.time_seconds:7.3f}s")
+
+            if not nf.midi_numbers:
+                print("   (no notes)")
+                continue
+
+            for midi, freq, mag in zip(
+                nf.midi_numbers,
+                nf.frequencies_hz,
+                nf.magnitudes,
+            ):
+                print(
+                    f"   MIDI {midi:3d} | "
+                    f"{freq:8.2f} Hz | "
+                    f"mag={mag:.6f}"
+                )
+                      
+
+def plot_detected_notes(frames, note_frames):
+    times = []
+    midi_vals = []
+
+    for f, nf in zip(frames, note_frames):
+        for midi in nf.midi_numbers:
+            times.append(f.time_seconds)
+            midi_vals.append(midi)
+
+    if not midi_vals:
+        print("No note hypotheses to plot.")
+        return
+
+    plt.figure(figsize=(10, 4))
+    plt.scatter(times, midi_vals, s=5)
+    plt.xlabel("Time (s)")
+    plt.ylabel("MIDI Note")
+    plt.title("Detected Note Hypotheses")
+    plt.tight_layout()
+    plt.show()
+    
+  
+def summarize_note_activity(note_frames):
+    total_frames = len(note_frames)
+    active_frames = sum(1 for nf in note_frames if len(nf.midi_numbers) > 0)
+
+    print("\n--- Note Activity Summary ---")
+    print(f"  Total frames     : {total_frames}")
+    print(f"  Active frames    : {active_frames}")
+    print(f"  Activity ratio   : {active_frames / total_frames:.3f}")
+    
+    
 def main():
     # Example audio inputs used for local diagnostics
-    FILE_PATHS = ["bass1.wav", "something.wav"]
+    FILE_PATHS = ["bass1.wav", "something.wav", "piano_test.wav"]
     
-    audio = ab.load_audio_buffer(f"./bass_files/{FILE_PATHS[1]}")
+    audio = ab.load_audio_buffer(f"./bass_files/{FILE_PATHS[2]}")
     num_samples = len(audio.data)
     duration_seconds = num_samples / audio.sample_rate
     print(f"Loaded audio buffer with {len(audio.data)} samples at {audio.sample_rate} Hz for {duration_seconds:.2f} seconds")
@@ -465,6 +521,10 @@ def main():
         fft_size=stft_window,
         window="hann",
     )
+    print("Magnitude stats:")
+    print("  max:", np.max(spec.magnitude))
+    print("  mean:", np.mean(spec.magnitude))
+    print("  min:", np.min(spec.magnitude))
 
     print(f"Spectrogram shape: {spec.complex_spectrum.shape}")
 
@@ -472,6 +532,40 @@ def main():
     inspect_spectrum_frame(spec, frame_index=10)
     validate_stft_roundtrip(audio, spec)
     visualize_window_overlap(spec)
+    print("\n--- Extracting Spectral Peaks ---")
+
+    peak_frames = list(
+        spk.extract_spectral_peaks(
+            spectrogram=spec,
+            magnitude_threshold=0.02,  # deterministic absolute threshold
+            min_bin=1,
+        )
+    )
+
+    print(f"Built {len(peak_frames)} SpectralPeakFrames")
+
+
+    print("\n--- Projecting Peaks to Notes ---")
+
+    note_frames = list(
+        npj.project_peaks_to_notes(
+            peak_frames=peak_frames,
+            f_min=30.0,
+            f_max=2000.0,
+        )
+    )
+
+    print(f"Built {len(note_frames)} NoteFrames")
+
+    summarize_note_activity(note_frames)
+    # inspect_note_frames(
+    #     note_frames=note_frames,
+    #     frames=frames,
+    #     target_time=2.5,
+    #     window=0.3,
+    # )
+
+    plot_detected_notes(frames, note_frames)
 
 
 if __name__ == "__main__":

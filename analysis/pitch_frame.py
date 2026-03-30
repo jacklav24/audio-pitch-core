@@ -149,8 +149,8 @@ def estimate_pitch_autocorr(frame : Frame, sample_rate: int, f_min : float = 30.
         return PitchFrame(frame.frame_index, None, 0.0, "autocorr", None)
     
     # select the strongest peak 
-    # Select the strongest peak
     best_lag, best_value = max(peaks, key=lambda x: x[1])
+    #ts peak
 
     # Minimum peak strength threshold
     PEAK_THRESHOLD = 0.3
