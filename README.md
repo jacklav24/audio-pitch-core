@@ -1,14 +1,17 @@
 ﻿
 
 
-# Python Time
+# Audio Pitch Core
 
 > **New here?** See [`SUMMARY.md`](SUMMARY.md) for a concise overview of the project’s goals, architecture, and design philosophy.
 
 
 **My main goal of this project is to first build some infrastructure, for music/audio analysis, which will later support machine learning and higher-level analysis layers. To start, we are building the framing and pitch identification.**
 
-**Currently, main.py runs some tests/checks of the stuff I've built so far. Once I get a little more fleshed out, I'll write a .md file that explains how to run everything.**
+The primary entrypoint is now a local React and FastAPI dashboard. It lists valid
+WAV files from a configured directory and renders raw autocorrelation pitch
+estimates with estimator confidence. The original exploratory entrypoint is
+retained unchanged at `backend/src/legacy/main.py`.
 
 #### I've had chatGPT write most of the docstrings for functions and classes after the fact. None of the other code, unless explicitly referenced, is AI generated.
 
@@ -16,50 +19,46 @@
 
 This project emphasizes deterministic signal processing, explicit uncertainty, and empirical characterization before introducing machine learning.
 
-### Needed info:
+## Run the Dashboard
 
-In terminal type:
-`/opt/homebrew/bin/python3 -m venv .venv`
+Prerequisites are `uv` and Node.js 20 or newer. From the repository root:
 
-#### You can replace OPT/HOMEBREW/BIN/PYTHON3 with your preferred/installed python.
-
-Then:
-`source .venv/bin/activate`
-
-#### TO close....
-`deactivate`
-
-
-We'll load the audio from the disk, convert to a standardized internal representation.
-
-I've settled on **soundfile** as my audio loader. It's a wrapper around **libsndfile**.  
-This is best, since it has a good api and is wisely used. It'll require MP3 fallbacks, potentially.
-
-`pip install soundfile` (if you didn't run pip install soundfile)
-
-The __read__ function has a couple of good parameters to use. We'll use `file, dtype, always_2d` to ensure that the file path is specified, datatype is specified, and that the audio isn't forced to stereo at all times.
-
-##### After we input the file, we get a few variables:
-`data` 	--->		 			 the actual audio, represented by a numpy array  
-`sample_rate `	--->		 how often during the audio is a sample taken
-`num_channels` 	---> 		 how many channels the audio have? (mono/stereo/other)
-
-### Building A Long-Term Package
-This is for later reference, but I want to follow this setup:
+```bash
+uv run dashboard
 ```
-audio_analyzer/
-│
-├── core/
-│   ├── audio_buffer.py
-│   ├── framing.py
-│   ├── pitch.py
-│   └── __init__.py
-│
-├── io/
-│   ├── loaders.py
-│   └── __init__.py
-│
-├── main.py
+
+The first run installs both Python and frontend dependencies. Open
+`http://127.0.0.1:5173`; FastAPI documentation is available at
+`http://127.0.0.1:8000/docs`. Stop both processes with `Ctrl+C`.
+
+The audio directory defaults to `bass_files`. Override it with either an
+absolute path or a path relative to the repository root:
+
+```bash
+AUDIO_FILES_DIR=/path/to/wav-library uv run dashboard
+```
+
+Only files with a `.wav` suffix and a valid WAV container are shown. MP3 files,
+including files renamed to end in `.wav`, are rejected.
+
+Run verification separately with:
+
+```bash
+uv run pytest
+cd frontend && npm run build
+```
+
+## Project Layout
+
+```text
+backend/src/
+├── analysis/       Existing pitch, diagnostics, and projection algorithms
+├── app/            FastAPI routes, validation, services, and local launcher
+├── core/           Existing audio buffer, framing, and spectrogram primitives
+└── legacy/         Original exploratory main.py
+frontend/           React and TypeScript dashboard
+tests/              API and validation tests
+pyproject.toml      uv-managed Python project and dashboard command
 ```
 
 ## Various Decisions Made:
