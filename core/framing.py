@@ -28,7 +28,7 @@ class Frame:
 
     Invariants:
     - samples is 1D numpy.ndarray
-    - samples corresponds to audio_buffer.data[start_sample : start_sample + frame_size]
+    - samples corresponds to audio_buffer.get_data()[start_sample : start_sample + frame_size]
     - time_seconds corresponds to the center of the frame
     - frame_index uniquely identifies ordering, not time
 
@@ -82,12 +82,15 @@ def build_frames(audio_buffer: AudioBuffer, frame_size_samples: int, hop_size_sa
     """
     
     
-    last_frame_index = (len(audio_buffer.data) - frame_size_samples) // hop_size_samples
+    audio_data = audio_buffer.get_data()
+    sample_rate = audio_buffer.get_sample_rate()
+
+    last_frame_index = (len(audio_data) - frame_size_samples) // hop_size_samples
 
     
     for frame_index in range(last_frame_index + 1):
         start_sample = frame_index * hop_size_samples
         end_sample = start_sample + frame_size_samples
-        samples = audio_buffer.data[start_sample:end_sample]
-        time_seconds = start_sample / audio_buffer.sample_rate + frame_size_samples / audio_buffer.sample_rate / 2.0  # center time of the frame
+        samples = audio_data[start_sample:end_sample]
+        time_seconds = start_sample / sample_rate + frame_size_samples / sample_rate / 2.0  # center time of the frame
         yield Frame(frame_index, start_sample, samples, time_seconds)

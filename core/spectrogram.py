@@ -95,7 +95,7 @@ class Spectrogram:
             window_vector = np.ones(window_size)
 
         assert window_vector.shape == (window_size,)
-        window_vector = window_vector.astype(buffer.data.dtype)
+        window_vector = window_vector.astype(buffer.get_data().dtype)
 
         # ----------------------------
         # Frame Extraction
@@ -145,7 +145,7 @@ class Spectrogram:
         if n_bins != expected_bins:
             raise ValueError("Unexpected rFFT bin count.")
 
-        sample_rate = buffer.sample_rate
+        sample_rate = buffer.get_sample_rate()
 
         # Time axis: use frame center times for consistency
         time_axis = np.array([f.time_seconds for f in frames])
@@ -159,7 +159,7 @@ class Spectrogram:
         
         covered_length = hop_size*(n_frames-1) + window_size
         
-        if covered_length > len(buffer.data):
+        if covered_length > len(buffer.get_data()):
             raise ValueError("Covered length exceeds original signal length.")
         # ----------------------------
         # Construct Instance
@@ -173,7 +173,7 @@ class Spectrogram:
         obj._fft_size = fft_size
         obj._window_vector = window_vector
         obj._sample_rate = sample_rate
-        obj._original_length = len(buffer.data)
+        obj._original_length = len(buffer.get_data())
         obj._time_axis = time_axis
         obj._frequency_axis = frequency_axis
         obj._covered_length = covered_length

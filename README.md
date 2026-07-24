@@ -102,11 +102,13 @@ That shape is (num_samples,).
 
 The length of time of an AudioBuffer is `num_samples / sample_rate`, where `num_samples = len(data)`. We use this rather than `frames` (a variable defined by soundfile) simply for consistency's sake.
 
+The stored samples and sample rate are kept private inside the object and accessed through getters, so the immutability contract is explicit in the code rather than just a convention.
+
 ### AudioBuffer Object:
 ```
 AudioBuffer {  
-data: float[],  
-sample_rate: int,  
+_data: float[],  
+_sample_rate: int,  
 }
 ```
 

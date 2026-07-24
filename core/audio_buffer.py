@@ -34,8 +34,20 @@ class AudioBuffer:
     beyond enforcing the above invariants.
     """
     def __init__(self, data: np.ndarray, sample_rate: int):
-        self.data = data
-        self.sample_rate = sample_rate
+        self._data = data
+        self._sample_rate = sample_rate
+
+    def get_data(self) -> np.ndarray:
+        """
+        Return the immutable audio sample array.
+        """
+        return self._data
+
+    def get_sample_rate(self) -> int:
+        """
+        Return the fixed sample rate in Hz.
+        """
+        return self._sample_rate
         
         
         

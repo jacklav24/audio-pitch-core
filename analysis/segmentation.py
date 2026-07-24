@@ -10,7 +10,7 @@
 
 #   frames: tuple[PitchFrame]   # immutable reference
 
-#   voiced_ratio: float         # fraction with f0 != None
+#   voiced_ratio: float         # fraction with f0_hz != None
 #   confidence_stats:
 #     mean: float
 #     median: float
@@ -53,20 +53,20 @@ class Segment:
     def voiced_ratio(self) -> float:
         # A Segment may contain frames with f0 is None; such frames contribute to duration and confidence statistics but not pitch statistics.
         
-        return sum(f.f0 is not None for f in self.pitch_frames) / len(self.pitch_frames)
+        return sum(f.f0_hz is not None for f in self.pitch_frames) / len(self.pitch_frames)
 
     @property
     def mean_confidence(self) -> float:
         return sum(f.confidence for f in self.pitch_frames) / len(self.pitch_frames)
     @property
     def median_f0(self) -> float | None:
-        f0s = [f.f0 for f in self.pitch_frames if f.f0 is not None]
+        f0s = [f.f0_hz for f in self.pitch_frames if f.f0_hz is not None]
         if not f0s:
             return None
         return np.median(f0s)
     @property
     def dispersion_hz(self) -> float | None:
-        f0s = [f.f0 for f in self.pitch_frames if f.f0 is not None]
+        f0s = [f.f0_hz for f in self.pitch_frames if f.f0_hz is not None]
         if len(f0s) < 2:
             return None
         f0s = np.array(f0s)

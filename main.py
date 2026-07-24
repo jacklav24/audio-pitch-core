@@ -91,14 +91,14 @@ def debug_frame_function(audio, frames, frame_size_samples, duration_seconds):
 
     end_time_estimate = (
         last.start_sample + frame_size_samples
-    ) / audio.sample_rate
+    ) / audio.get_sample_rate()
 
     print(f"End of last frame ≈ {end_time_estimate:.4f}s")
     print(f"Audio duration      = {duration_seconds:.4f}s")
     import matplotlib.pyplot as plt
 
     plt.figure(figsize=(10, 3))
-    plt.plot(audio.data, alpha=0.5)
+    plt.plot(audio.get_data(), alpha=0.5)
     for f in frames[:10]:
         plt.axvline(f.start_sample, color='r', alpha=0.3)
     plt.title("Audio with first few frame start positions")
@@ -344,10 +344,10 @@ def validate_stft_roundtrip(audio: ab.AudioBuffer, spec: sp.Spectrogram):
 
     reconstructed = spec.inverse()
 
-    original = audio.data
+    original = audio.get_data()
     covered_length = spec.covered_length
 
-    if len(reconstructed.data) != covered_length:
+    if len(reconstructed.get_data()) != covered_length:
         raise ValueError(
             "Reconstructed signal length does not match spectrogram covered length."
         )
@@ -358,7 +358,7 @@ def validate_stft_roundtrip(audio: ab.AudioBuffer, spec: sp.Spectrogram):
         )
 
     # Compare only covered region
-    error = original[:covered_length] - reconstructed.data
+    error = original[:covered_length] - reconstructed.get_data()
 
     max_error = np.max(np.abs(error))
     mean_error = np.mean(np.abs(error))
@@ -467,12 +467,12 @@ def main():
     FILE_PATHS = ["bass1.wav", "something.wav", "piano_test.wav"]
     
     audio = ab.load_audio_buffer(f"./bass_files/{FILE_PATHS[2]}")
-    num_samples = len(audio.data)
-    duration_seconds = num_samples / audio.sample_rate
-    print(f"Loaded audio buffer with {len(audio.data)} samples at {audio.sample_rate} Hz for {duration_seconds:.2f} seconds")
+    num_samples = len(audio.get_data())
+    duration_seconds = num_samples / audio.get_sample_rate()
+    print(f"Loaded audio buffer with {len(audio.get_data())} samples at {audio.get_sample_rate()} Hz for {duration_seconds:.2f} seconds")
     
-    frame_size_samples = int(0.1 * audio.sample_rate)  # 100 ms frames
-    hop_size_samples = int(0.025 * audio.sample_rate)   # 25 ms hop size
+    frame_size_samples = int(0.1 * audio.get_sample_rate())  # 100 ms frames
+    hop_size_samples = int(0.025 * audio.get_sample_rate())   # 25 ms hop size
     
     frames = list(fr.build_frames(audio, frame_size_samples, hop_size_samples))
     print(f"Built {len(frames)} frames of size {frame_size_samples} samples with hop size {hop_size_samples}")
@@ -480,7 +480,7 @@ def main():
     pitch_frames = list(
         pf.estimate_pitch_sequence(
             frames,
-            audio.sample_rate,
+            audio.get_sample_rate(),
             method="autocorr",
             f_min=30.0,
             f_max=500.0,
