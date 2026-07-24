@@ -1,0 +1,39 @@
+[project]
+name = "audio-pitch-core"
+version = "0.1.0"
+description = "Inspectable audio pitch analysis with a FastAPI and React dashboard."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.116,<1",
+    "matplotlib>=3.10,<4",
+    "numpy>=2.0,<3",
+    "scipy>=1.16,<2",
+    "soundfile>=0.13,<1",
+    "uvicorn[standard]>=0.35,<1",
+]
+
+[project.scripts]
+dashboard = "app.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28,<1",
+    "pytest>=8.4,<9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "backend/src/analysis",
+    "backend/src/app",
+    "backend/src/core",
+    "backend/src/legacy",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

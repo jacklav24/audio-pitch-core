@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 env/
 venv/
+node_modules/
+frontend/dist/
 .idea/
 .vscode/
 .DS_Store

@@ -22,8 +22,12 @@ import core.audio_buffer as ab
 import core.framing as fr
 import analysis.pitch_frame as pf
 import analysis.smoothing as sm
-
+import core.spectrogram as sp
+import matplotlib.pyplot as plt
+import numpy as np
 from analysis.diagnostics import summarize_pitch_track
+import analysis.spectral_peaks as spk
+import analysis.note_projection as npj
 
 def inspect_frames_around_time(frames, pitch_frames, target_time, window=0.25):
     print(f"\nInspecting frames around {target_time:.2f}s (±{window:.2f}s):\n")
@@ -87,14 +91,14 @@ def debug_frame_function(audio, frames, frame_size_samples, duration_seconds):
 
     end_time_estimate = (
         last.start_sample + frame_size_samples
-    ) / audio.sample_rate
+    ) / audio.get_sample_rate()
 
     print(f"End of last frame ≈ {end_time_estimate:.4f}s")
     print(f"Audio duration      = {duration_seconds:.4f}s")
     import matplotlib.pyplot as plt
 
     plt.figure(figsize=(10, 3))
-    plt.plot(audio.data, alpha=0.5)
+    plt.plot(audio.get_data(), alpha=0.5)
     for f in frames[:10]:
         plt.axvline(f.start_sample, color='r', alpha=0.3)
     plt.title("Audio with first few frame start positions")
@@ -275,17 +279,200 @@ def run_diagnostics(pitch_frames: list[pf.PitchFrame]):
     print(f"  High-conf median |Δf0| Hz : {diagnostics.confidence.high_conf_median_abs_delta_hz:.3f}")
     print(f"  Conf–Δf0 monotonicity     : {diagnostics.confidence.conf_delta_monotonicity:.3f}")
     
+def plot_spectrogram(spec: sp.Spectrogram, db: bool = False):
+    """
+    Visualize magnitude spectrogram.
+    """
+    magnitude = spec.magnitude
+
+    if db:
+        magnitude = 20 * np.log10(np.maximum(magnitude, 1e-10))
+
+    plt.figure(figsize=(10, 4))
+    plt.imshow(
+        magnitude.T,
+        aspect="auto",
+        origin="lower",
+        extent=[
+            spec.time_axis[0],
+            spec.time_axis[-1],
+            spec.frequency_axis[0],
+            spec.frequency_axis[-1],
+        ],
+    )
+    plt.colorbar(label="Magnitude (dB)" if db else "Magnitude")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Frequency (Hz)")
+    plt.title("Spectrogram")
+    plt.tight_layout()
+    plt.show()
+
+def inspect_spectrum_frame(spec: sp.Spectrogram, frame_index: int):
+    """
+    Plot magnitude and phase of a single STFT frame.
+    """
+    if frame_index < 0 or frame_index >= spec.complex_spectrum.shape[0]:
+        raise ValueError("Invalid frame index.")
+
+    freqs = spec.frequency_axis
+    magnitude = spec.magnitude[frame_index]
+    phase = spec.phase[frame_index]
+
+    plt.figure(figsize=(10, 5))
+
+    plt.subplot(2, 1, 1)
+    plt.plot(freqs, magnitude)
+    plt.ylabel("Magnitude")
+    plt.title(f"Frame {frame_index} Spectrum")
+
+    plt.subplot(2, 1, 2)
+    plt.plot(freqs, phase)
+    plt.ylabel("Phase (radians)")
+    plt.xlabel("Frequency (Hz)")
+
+    plt.tight_layout()
+    plt.show()
+    
+def validate_stft_roundtrip(audio: ab.AudioBuffer, spec: sp.Spectrogram):
+    """
+    Validate forward → inverse reconstruction error over the covered region.
+
+    The Spectrogram operates only on fully-contained frames and therefore
+    represents only the interval [0, covered_length). Samples beyond this
+    region are intentionally excluded (no padding policy).
+    """
+
+    reconstructed = spec.inverse()
+
+    original = audio.get_data()
+    covered_length = spec.covered_length
+
+    if len(reconstructed.get_data()) != covered_length:
+        raise ValueError(
+            "Reconstructed signal length does not match spectrogram covered length."
+        )
+
+    if covered_length > len(original):
+        raise ValueError(
+            "Covered length exceeds original signal length."
+        )
+
+    # Compare only covered region
+    error = original[:covered_length] - reconstructed.get_data()
+
+    max_error = np.max(np.abs(error))
+    mean_error = np.mean(np.abs(error))
+
+    print("\nSTFT Roundtrip Validation")
+    print(f"  Original length      : {len(original)}")
+    print(f"  Covered length       : {covered_length}")
+    print(f"  Max abs error        : {max_error:.8e}")
+    print(f"  Mean abs error       : {mean_error:.8e}")
+
+    # Optional: RMS error
+    rms_error = np.sqrt(np.mean(error ** 2))
+    print(f"  RMS error            : {rms_error:.8e}")
+
+    # Plot reconstruction error
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(10, 3))
+    plt.plot(error, linewidth=0.5)
+    plt.title("Reconstruction Error (Covered Region Only)")
+    plt.xlabel("Sample Index")
+    plt.ylabel("Error")
+    plt.tight_layout()
+    plt.show()
+    
+def visualize_window_overlap(spec: sp.Spectrogram):
+    """
+    Visualize accumulated window overlap energy profile.
+    """
+    n_frames = spec.complex_spectrum.shape[0]
+    hop = spec._hop_size
+    window = spec._window_vector
+    window_size = spec._window_size
+
+    total_length = hop * (n_frames - 1) + window_size
+    energy = np.zeros(total_length)
+
+    for k in range(n_frames):
+        start = k * hop
+        end = start + window_size
+        energy[start:end] += window ** 2
+
+    plt.figure(figsize=(10, 3))
+    plt.plot(energy)
+    plt.title("Window Overlap Energy Profile")
+    plt.tight_layout()
+    plt.show()
+    
+def inspect_note_frames(note_frames, frames, target_time, window=0.05):
+    print(f"\nInspecting note hypotheses around {target_time:.2f}s (±{window:.2f}s):\n")
+
+    for f, nf in zip(frames, note_frames):
+        if abs(f.time_seconds - target_time) <= window:
+            print(f"Frame {f.frame_index:5d} | time={f.time_seconds:7.3f}s")
+
+            if not nf.midi_numbers:
+                print("   (no notes)")
+                continue
+
+            for midi, freq, mag in zip(
+                nf.midi_numbers,
+                nf.frequencies_hz,
+                nf.magnitudes,
+            ):
+                print(
+                    f"   MIDI {midi:3d} | "
+                    f"{freq:8.2f} Hz | "
+                    f"mag={mag:.6f}"
+                )
+                      
+
+def plot_detected_notes(frames, note_frames):
+    times = []
+    midi_vals = []
+
+    for f, nf in zip(frames, note_frames):
+        for midi in nf.midi_numbers:
+            times.append(f.time_seconds)
+            midi_vals.append(midi)
+
+    if not midi_vals:
+        print("No note hypotheses to plot.")
+        return
+
+    plt.figure(figsize=(10, 4))
+    plt.scatter(times, midi_vals, s=5)
+    plt.xlabel("Time (s)")
+    plt.ylabel("MIDI Note")
+    plt.title("Detected Note Hypotheses")
+    plt.tight_layout()
+    plt.show()
+    
+  
+def summarize_note_activity(note_frames):
+    total_frames = len(note_frames)
+    active_frames = sum(1 for nf in note_frames if len(nf.midi_numbers) > 0)
+
+    print("\n--- Note Activity Summary ---")
+    print(f"  Total frames     : {total_frames}")
+    print(f"  Active frames    : {active_frames}")
+    print(f"  Activity ratio   : {active_frames / total_frames:.3f}")
+    
+    
 def main():
     # Example audio inputs used for local diagnostics
-    FILE_PATHS = ["bass1.wav", "something.wav"]
+    FILE_PATHS = ["bass1.wav", "something.wav", "piano_test.wav"]
     
-    audio = ab.load_audio_buffer(f"./bass_files/{FILE_PATHS[1]}")
-    num_samples = len(audio.data)
-    duration_seconds = num_samples / audio.sample_rate
-    print(f"Loaded audio buffer with {len(audio.data)} samples at {audio.sample_rate} Hz for {duration_seconds:.2f} seconds")
+    audio = ab.load_audio_buffer(f"./bass_files/{FILE_PATHS[2]}")
+    num_samples = len(audio.get_data())
+    duration_seconds = num_samples / audio.get_sample_rate()
+    print(f"Loaded audio buffer with {len(audio.get_data())} samples at {audio.get_sample_rate()} Hz for {duration_seconds:.2f} seconds")
     
-    frame_size_samples = int(0.1 * audio.sample_rate)  # 100 ms frames
-    hop_size_samples = int(0.025 * audio.sample_rate)   # 25 ms hop size
+    frame_size_samples = int(0.1 * audio.get_sample_rate())  # 100 ms frames
+    hop_size_samples = int(0.025 * audio.get_sample_rate())   # 25 ms hop size
     
     frames = list(fr.build_frames(audio, frame_size_samples, hop_size_samples))
     print(f"Built {len(frames)} frames of size {frame_size_samples} samples with hop size {hop_size_samples}")
@@ -293,7 +480,7 @@ def main():
     pitch_frames = list(
         pf.estimate_pitch_sequence(
             frames,
-            audio.sample_rate,
+            audio.get_sample_rate(),
             method="autocorr",
             f_min=30.0,
             f_max=500.0,
@@ -309,18 +496,76 @@ def main():
     smoothed_pitch_frames = sm.smooth_pitch_frames(pitch_frames, confidence_min=confidence_min, window_size=window_size)
     print(f"Built {len(smoothed_pitch_frames)} smoothed PitchFrames with confidence_min of {confidence_min} and window size of {window_size}")
     
-    #debug_frame_function(audio, frames, frame_size_samples, duration_seconds)
-    # debug_pitch_frame_function(pitch_frames, frames)
-    # plot_pitch_window(frames, pitch_frames, t_start=35.0, t_end=40.0)
-    # inspect_frames_around_time(frames, pitch_frames, target_time=2.5, window=0.3)
-    # assert_no_pitch_invention(pitch_frames, smoothed_pitch_frames)
-    # summarize_smoothing_adjustments(pitch_frames, smoothed_pitch_frames)
+    debug_frame_function(audio, frames, frame_size_samples, duration_seconds)
+    debug_pitch_frame_function(pitch_frames, frames)
+    plot_pitch_window(frames, pitch_frames, t_start=35.0, t_end=40.0)
+    inspect_frames_around_time(frames, pitch_frames, target_time=2.5, window=0.3)
+    assert_no_pitch_invention(pitch_frames, smoothed_pitch_frames)
+    summarize_smoothing_adjustments(pitch_frames, smoothed_pitch_frames)
     
     print("Raw (unsmoothed) diagnostics")
     run_diagnostics(pitch_frames)
 
     print("Post-refinement diagnostics")
     run_diagnostics(smoothed_pitch_frames)
+    
+    print("\n--- Building Spectrogram ---")
+
+    stft_window = frame_size_samples
+    stft_hop = hop_size_samples
+
+    spec = sp.Spectrogram.from_audio_buffer(
+        audio,
+        window_size=stft_window,
+        hop_size=stft_hop,
+        fft_size=stft_window,
+        window="hann",
+    )
+    print("Magnitude stats:")
+    print("  max:", np.max(spec.magnitude))
+    print("  mean:", np.mean(spec.magnitude))
+    print("  min:", np.min(spec.magnitude))
+
+    print(f"Spectrogram shape: {spec.complex_spectrum.shape}")
+
+    plot_spectrogram(spec, db=True)
+    inspect_spectrum_frame(spec, frame_index=10)
+    validate_stft_roundtrip(audio, spec)
+    visualize_window_overlap(spec)
+    print("\n--- Extracting Spectral Peaks ---")
+
+    peak_frames = list(
+        spk.extract_spectral_peaks(
+            spectrogram=spec,
+            magnitude_threshold=0.02,  # deterministic absolute threshold
+            min_bin=1,
+        )
+    )
+
+    print(f"Built {len(peak_frames)} SpectralPeakFrames")
+
+
+    print("\n--- Projecting Peaks to Notes ---")
+
+    note_frames = list(
+        npj.project_peaks_to_notes(
+            peak_frames=peak_frames,
+            f_min=30.0,
+            f_max=2000.0,
+        )
+    )
+
+    print(f"Built {len(note_frames)} NoteFrames")
+
+    summarize_note_activity(note_frames)
+    # inspect_note_frames(
+    #     note_frames=note_frames,
+    #     frames=frames,
+    #     target_time=2.5,
+    #     window=0.3,
+    # )
+
+    plot_detected_notes(frames, note_frames)
 
 
 if __name__ == "__main__":
